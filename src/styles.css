@@ -1,0 +1,56 @@
+@font-face {
+    font-family: sfb;
+    src: url('./sfb.woff2');
+}
+
+@font-face {
+    font-family: sfr;
+    src: url('./sfr.woff2');
+}
+
+:root {
+    --index: calc(1vw + 1vh);
+}
+
+body {
+    background: #fff;
+    font-family: sfr;
+    margin: 0;
+}
+
+h2 {
+    font-size: calc(var(--index) * 1.25 + 16px);
+    margin: 0;
+}
+
+h1 {
+    font-size: calc(var(--index) * 1.1 + 9px);
+    margin: calc(var(--index) * 0.2 + 2px) 0 calc(var(--index) * 0.4 + 6px);
+    font-weight: 400;
+}
+
+button {
+    background: #ffe100;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    font-family: 'Google Sans', sans-serif;
+    padding: 10px 16px;
+}
+
+button p {
+    margin: 0;
+    font-size: calc(var(--index) * 0.6 + 5px);
+}
+
+.block {
+    text-align: center;
+    margin: 20vh 20px;
+}
+
+.more {
+    width: calc(100% - 40px);
+    margin: 0 auto;
+    padding: 0 20px;
+    max-width: 600px;
+}

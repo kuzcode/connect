@@ -1,0 +1,80 @@
+.notfound {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  background: radial-gradient(1200px 600px at 20% 0%, rgba(255, 62, 81, 0.18), transparent 55%),
+    radial-gradient(1000px 500px at 90% 10%, rgba(0, 122, 255, 0.14), transparent 50%),
+    linear-gradient(180deg, #f5f5f7 0%, #ececf2 100%);
+}
+
+.notfound-card {
+  width: 100%;
+  max-width: 320px;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(10px);
+  border-radius: 48px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  padding: 28px 22px 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.notfound-glow {
+  position: absolute;
+  inset: -40% -30%;
+  background: conic-gradient(from 220deg, rgba(255, 62, 81, 0.35), rgba(0, 122, 255, 0.28), rgba(255, 209, 0, 0.25), rgba(255, 62, 81, 0.35));
+  filter: blur(40px);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.notfound h6 {
+  margin: 0;
+  font-family: sfb;
+  font-size: calc(2vw + 36px);
+  text-align: center;
+  line-height: calc(2vw + 28px);
+}
+
+.notfound-badge {
+  font-family: sfr;
+  text-align: center;
+  font-size: 18px;
+  color: #1d1d1f;
+  margin: 0;
+}
+
+.notfound-actions {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.notfound-primary {
+  border: none;
+  border-radius: 999px;
+  padding: 12px 16px;
+  background: #ff3e51;
+  margin: 0 auto;
+  color: #fff;
+  cursor: pointer;
+  font-family: sfr;
+  font-size: 14px;
+  transition: .2s;
+}
+
+.notfound-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px #ff00113d;
+}
+
+.notfound-secondary:hover {
+  transform: translateY(-1px);
+  background: rgba(0, 0, 0, 0.05);
+}
+
