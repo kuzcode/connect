@@ -2,7 +2,7 @@ import { Client, Databases, Query, Account, ID, Storage } from 'appwrite';
 
 // Предполагаем, что используется Appwrite Cloud.
 // При необходимости поменяйте endpoint на свой (например, http://localhost/v1).
-const APPWRITE_ENDPOINT = 'https://cloud.appwrite.io/v1';
+const APPWRITE_ENDPOINT = 'https://fra.cloud.appwrite.io/v1';
 const PROJECT_ID = '69ad52b9002370350eee';
 const DATABASE_ID = '69ad534000186b123410';
 const CONFIG_COLLECTION_ID = 'configurations';
