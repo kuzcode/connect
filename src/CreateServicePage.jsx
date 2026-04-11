@@ -799,7 +799,7 @@ function CreateServicePage() {
               <span className="field-badge">Обязательно</span>
             </div>
             <p className="field-help">
-              Уникальный адрес: https://connect.pro/<span className='colored'>{configId}</span>
+              Уникальный адрес: https://cnct.click/<span className='colored'>{configId}</span>
             </p>
 
             <div className="id-row">

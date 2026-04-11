@@ -1,0 +1,85 @@
+@font-face {
+    font-family: sfb;
+    src: url('./sfb.woff2');
+}
+
+@font-face {
+    font-family: sfr;
+    src: url('./sfr.woff2');
+}
+
+:root {
+    --index: calc(1vw + 1vh);
+}
+
+body {
+    background: #fff;
+    margin: 0;
+}
+
+header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+}
+
+header h2 {
+    color: #fff;
+    font-family: sfb;
+    margin: 0;
+}
+
+main {
+    font-family: sfr;
+    margin: 0;
+    background: #ff3e51;
+}
+
+h1 {
+    font-family: sfb;
+    color: #ff3e51;
+}
+
+.w800 {
+    max-width: 800px;
+    margin: 0 auto;
+    height: 84vh;
+    margin: 0 auto;
+    padding: 16vh 16px 0 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.text {
+    color: #fff;
+    font-size: calc(var(--index) * 2 + 14px);
+    line-height: 1.4;
+    margin-bottom: 12px;
+}
+
+.lottie-wrapper {
+    display: inline-block;
+    width: calc(var(--index) * 2 + 20px);
+    height: calc(var(--index) * 2 + 20px);
+    vertical-align: middle;
+    margin-right: 6px;
+}
+
+button {
+    padding: 8px 16px;
+    border-radius: 50px;
+    border: none;
+    background: #fff;
+    color: #ff3e51;
+    font-size: 15px;
+    box-shadow: 0 4px 14px #ac002034;
+}
+
+p {
+    margin: 0;
+}

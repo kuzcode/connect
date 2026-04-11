@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import './styles.css';
+import './home.css'
 import { getCurrentUser } from './appwriteClient.js';
+import Lottie from 'lottie-react';
+import flower from './flower.json';
+import globe from './globe.json';
 
 function HomePage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -35,20 +38,40 @@ function HomePage() {
   }
 
   return (
-    <main>
-      <div className="block">
+    <body>
+      <header>
         <h2>Коннект</h2>
-        <h1>И клиент доволен</h1>
-        <button type="button" onClick={() => navigate('/admin')}>
-          <p>Регистрация</p>
+        <button onClick={() => navigate('/admin')}>
+          <p>войти</p>
         </button>
-      </div>
+      </header>
 
-      <div className="more">
-        <h3>О сервисе</h3>
-        <p>Коннект — помощник вашего бизнеса, который принимает заявки, показывает ваше портфолио и помогает работать.</p>
-      </div>
-    </main>
+      <main>
+        <div className="w800">
+          <div className="col">
+            <div className="text">
+              <span>соединили красоту&nbsp;</span>
+
+              <div className="lottie-wrapper">
+                <Lottie animationData={flower} loop={true} />
+              </div>
+
+              <span>с комфортом, создав самый дешёвый сервис&nbsp;</span>
+
+              <div className="lottie-wrapper">
+                <Lottie animationData={globe} loop={true} />
+              </div>
+
+              <span>онлайн-брони.</span>
+            </div>
+
+            <button type="button" onClick={() => navigate('/admin')}>
+              <p>получить страницу</p>
+            </button>
+          </div>
+        </div>
+      </main>
+    </body>
   );
 }
 
