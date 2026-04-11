@@ -1,3 +1,17 @@
+@font-face {
+    font-family: sfb;
+    src: url('./sfb.woff2');
+}
+
+@font-face {
+    font-family: sfr;
+    src: url('./sfr.woff2');
+}
+
+body {
+    font-family: sfr;
+}
+
 .admin-main {
     width: calc(100% - 40px);
     margin: 32px auto;
@@ -378,7 +392,6 @@
 }
 
 .calendar-booking-card-name span {
-    font-family: sfr;
     font-size: 12px;
 }
 
@@ -496,7 +509,6 @@
     margin: 0;
     font-size: 14px;
     line-height: 1.35;
-    font-family: sfr;
 }
 
 .admin-telegram-warning-btn {
@@ -537,7 +549,6 @@
     margin: 0;
     color: #a95375;
     font-size: 14px;
-    font-family: sfr;
     margin-bottom: 16px;
 }
 
@@ -582,14 +593,12 @@
     justify-content: space-between;
     color: #a95375;
     font-size: 12px;
-    font-family: sfr;
 }
 
 .admin-stat-loading {
     margin: 6px 0 0;
     color: #8a3e5d;
     font-size: 12px;
-    font-family: sfr;
 }
 
 .admin-booking-details {
@@ -1917,7 +1926,6 @@
     max-width: 70px;
     width: 100%;
     padding: 0;
-    font-family: sfr;
     margin: 0 auto;
     border: none;
     border-radius: 10px;
@@ -1967,7 +1975,6 @@
     border: 1px solid rgba(0, 0, 0, 0.08);
     background: #f5f5f7;
     font-size: 14px;
-    font-family: sfr;
     color: #000000;
     cursor: pointer;
     transition: background 0.2s ease, border-color 0.2s ease;

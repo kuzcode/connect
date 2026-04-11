@@ -17,7 +17,7 @@ body {
     margin: 0;
 }
 
-header {
+.landing header {
     position: fixed;
     top: 0;
     left: 0;
@@ -27,19 +27,19 @@ header {
     justify-content: space-between;
 }
 
-header h2 {
+.landing header h2 {
     color: #fff;
     font-family: sfb;
     margin: 0;
 }
 
-main {
+.landing main {
     font-family: sfr;
     margin: 0;
     background: #ff3e51;
 }
 
-h1 {
+.landing h1 {
     font-family: sfb;
     color: #ff3e51;
 }
@@ -55,14 +55,14 @@ h1 {
     justify-content: space-between;
 }
 
-.text {
+.landing .text {
     color: #fff;
     font-size: calc(var(--index) * 2 + 14px);
     line-height: 1.4;
     margin-bottom: 12px;
 }
 
-.lottie-wrapper {
+.landing .lottie-wrapper {
     display: inline-block;
     width: calc(var(--index) * 2 + 20px);
     height: calc(var(--index) * 2 + 20px);
@@ -70,7 +70,7 @@ h1 {
     margin-right: 6px;
 }
 
-button {
+.landing button {
     padding: 8px 16px;
     border-radius: 50px;
     border: none;
@@ -80,6 +80,24 @@ button {
     box-shadow: 0 4px 14px #ac002034;
 }
 
-p {
+.landing p {
     margin: 0;
+}
+
+.load-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+}
+
+.loader {
+  height: 70px;
+  aspect-ratio: 1;
+  animation: l1 .64s infinite alternate;
+  background: #dd2d4a;
+}
+@keyframes l1 {
+  0% {clip-path: shape(from 97.5242216976% 60.8470934779%, curve to 88.111466744% 80.3928805396% with 95.0484433951% 71.6941869559%, curve to 71.1502683954% 93.9189848662% with 81.1744900929% 89.0915741234%, curve to 50% 98.7463956091% with 61.1260466978% 98.7463956091%, curve to 28.8497316046% 93.9189848662% with 38.8739533022% 98.7463956091%, curve to 11.888533256% 80.3928805396% with 18.8255099071% 89.0915741234%, curve to 2.4757783024% 60.8470934779% with 4.9515566049% 71.6941869559%, curve to 2.4757783024% 39.1529065221% with 0% 50%, curve to 11.888533256% 19.6071194604% with 4.9515566049% 28.3058130441%, curve to 28.8497316046% 6.0810151338% with 18.8255099071% 10.9084258766%, curve to 50% 1.2536043909% with 38.8739533022% 1.2536043909%, curve to 71.1502683954% 6.0810151338% with 61.1260466978% 1.2536043909%, curve to 88.111466744% 19.6071194604% with 81.1744900929% 10.9084258766%, curve to 97.5242216976% 39.1529065221% with 95.0484433951% 28.3058130441%, curve to 97.5242216976% 60.8470934779% with 100% 50%)}
+  100% {clip-path: shape(from 85.0242216976% 60.8470934779%, curve to 80.3178442208% 70.6199870088% with 95.0484433951% 71.6941869559%, curve to 63.3566458721% 84.1460913354% with 65.5872450465% 69.5457870617%, curve to 52.7815116745% 86.5597967068% with 61.1260466978% 98.7463956091%, curve to 31.6312432791% 81.732385964% with 44.4369766511% 74.3731978045%, curve to 23.1506441048% 74.9693338007% with 18.8255099071% 89.0915741234%, curve to 13.7378891512% 55.423546739% with 27.4757783024% 60.8470934779%, curve to 13.7378891512% 44.576453261% with 0% 50%, curve to 23.1506441048% 25.0306661993% with 27.4757783024% 39.1529065221%, curve to 31.6312432791% 18.267614036% with 18.8255099071% 10.9084258766%, curve to 52.7815116745% 13.4402032932% with 44.4369766511% 25.6268021955%, curve to 63.3566458721% 15.8539086646% with 61.1260466978% 1.2536043909%, curve to 80.3178442208% 29.3800129912% with 65.5872450465% 30.4542129383%, curve to 85.0242216976% 39.1529065221% with 95.0484433951% 28.3058130441%, curve to 85.0242216976% 60.8470934779% with 75% 50%)}
 }

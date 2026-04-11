@@ -29,16 +29,14 @@ function HomePage() {
 
   if (checkingAuth) {
     return (
-      <main>
-        <div className="block">
-          <p>Загрузка...</p>
-        </div>
-      </main>
+      <body className='load-container'>
+        <div class="loader"></div>
+      </body>
     );
   }
 
   return (
-    <body>
+    <body className='landing'>
       <header>
         <h2>Коннект</h2>
         <button onClick={() => navigate('/admin')}>
