@@ -175,6 +175,22 @@ function groupFlexWindowsByDate(windows) {
   return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 }
 
+function timeToParts(value) {
+  const [hRaw, mRaw] = String(value || '00:00').split(':');
+  const h = Number(hRaw);
+  const m = Number(mRaw);
+  return {
+    hour: String(Number.isFinite(h) ? Math.max(0, Math.min(23, h)) : 0).padStart(2, '0'),
+    minute: String(Number.isFinite(m) ? Math.max(0, Math.min(59, m)) : 0).padStart(2, '0'),
+  };
+}
+
+function partsToTime(hour, minute) {
+  const h = String(hour || '00').padStart(2, '0');
+  const m = String(minute || '00').padStart(2, '0');
+  return `${h}:${m}`;
+}
+
 function FlexSlotModalOverlay({
   date,
   start,
@@ -193,10 +209,16 @@ function FlexSlotModalOverlay({
     return () => { document.body.style.overflow = prev; };
   }, []);
 
+  const startParts = timeToParts(start);
+  const endParts = timeToParts(end);
+  const hourOptions = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+  const minuteOptions = ['00', '15', '30', '45'];
+
   const content = (
     <div className="modal-overlay" onClick={onClose} role="dialog" aria-modal="true">
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Свободное окно</h3>
+        <h3 className="modal-title">Свободное время</h3>
+        <p style={{color: '#666'}}>Не нужно разбивать окошки на сессии, система сделает это сама.</p>
         <div className="modal-row modal-row-stack">
           <label>
             <span className="modal-label">День</span>
@@ -210,11 +232,51 @@ function FlexSlotModalOverlay({
           </label>
           <label>
             <span className="modal-label">Начало</span>
-            <input type="time" className="branch-input" value={start} onChange={(e) => onStartChange(e.target.value)} />
+            <div className="time-select-row">
+              <select
+                className="branch-input time-select"
+                value={startParts.hour}
+                onChange={(e) => onStartChange(partsToTime(e.target.value, startParts.minute))}
+              >
+                {hourOptions.map((h) => (
+                  <option key={`start-hour-${h}`} value={h}>{h}</option>
+                ))}
+              </select>
+              <span className="time-separator">:</span>
+              <select
+                className="branch-input time-select"
+                value={startParts.minute}
+                onChange={(e) => onStartChange(partsToTime(startParts.hour, e.target.value))}
+              >
+                {minuteOptions.map((m) => (
+                  <option key={`start-minute-${m}`} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
           </label>
           <label>
             <span className="modal-label">Конец</span>
-            <input type="time" className="branch-input" value={end} onChange={(e) => onEndChange(e.target.value)} />
+            <div className="time-select-row">
+              <select
+                className="branch-input time-select"
+                value={endParts.hour}
+                onChange={(e) => onEndChange(partsToTime(e.target.value, endParts.minute))}
+              >
+                {hourOptions.map((h) => (
+                  <option key={`end-hour-${h}`} value={h}>{h}</option>
+                ))}
+              </select>
+              <span className="time-separator">:</span>
+              <select
+                className="branch-input time-select"
+                value={endParts.minute}
+                onChange={(e) => onEndChange(partsToTime(endParts.hour, e.target.value))}
+              >
+                {minuteOptions.map((m) => (
+                  <option key={`end-minute-${m}`} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
           </label>
         </div>
         {error ? <p className="submit-error" style={{ marginTop: 8 }}>{error}</p> : null}
@@ -744,7 +806,8 @@ function CreateServicePage() {
         <section className="create-card">
           <header className="create-card-header">
             <p className="eyebrow">Редактирование</p>
-            <h1>Загрузка конфигурации...</h1>
+            <h1>Загрузка...</h1>
+            <div class="loader"></div>
           </header>
         </section>
       </main>

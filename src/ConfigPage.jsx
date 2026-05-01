@@ -174,6 +174,16 @@ function ConfigPage() {
   const activeMaster = masterList[0] || null;
   const selectedService = services[selectedServiceIndex] || services[0] || null;
   const durationMinutes = selectedService ? selectedService.durationMinutes : DEFAULT_SERVICE_DURATION_MIN;
+  const hasAnyVisibleContacts = Boolean(
+    parsed?.contacts && (
+      parsed.contacts.address
+      || parsed.contacts.phone
+      || parsed.contacts.instagram
+      || parsed.contacts.telegramProfile
+      || parsed.contacts.telegramChannel
+      || parsed.contacts.whatsapp
+    ),
+  );
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -285,6 +295,7 @@ function ConfigPage() {
           username.trim() ? username.includes('@') ? `Telegram: ${username.trim()}` : `Telegram: @${username.trim()}` : '',
           instagram.trim() ? `Instagram: ${instagram.trim()}` : '',
           phone.trim() ? `Телефон: ${phone.trim()}` : '',
+          comment.trim() ? `Комментарий: ${comment.trim()}` : '',
         ].filter(Boolean).join('\n');
 
         await sendTelegramBookingNotification({
@@ -309,10 +320,10 @@ function ConfigPage() {
   if (loading) {
     return (
       <main className="booking-page">
-        <div className="booking-loader-card" role="status" aria-live="polite">
-          <div className="booking-spinner" aria-hidden="true" />
-          <p className="booking-loader-text">Загрузка коннекта...</p>
-        </div>
+        <div className="booking-loader-card">
+          <div class="loader"></div>
+            <p>Загрузка...</p>
+          </div>
       </main>
     );
   }
@@ -558,7 +569,7 @@ function ConfigPage() {
             </button>
           </div>
 
-          {parsed?.contacts  ? (
+          {hasAnyVisibleContacts ? (
             <>
             <p className="auth-eyebrow" style={{marginTop: 20}}>Контакты</p>
 

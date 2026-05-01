@@ -26,6 +26,7 @@ import edit from './icons/edit.png'
 import delet from './icons/delete.png'
 import view from './icons/view.png'
 import star from './icons/star.png'
+import copyIcon from './icons/copy.png'
 
 const DEFAULT_SERVICE_DURATION_MIN = 90;
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -226,6 +227,7 @@ function AdminPage() {
   const [balanceStarsInput, setBalanceStarsInput] = useState('300');
   const [balanceTopupSubmitting, setBalanceTopupSubmitting] = useState(false);
   const [balanceTopupError, setBalanceTopupError] = useState(null);
+  const [copyInfoModal, setCopyInfoModal] = useState(null);
 
   useEffect(() => {
     async function init() {
@@ -558,6 +560,36 @@ function AdminPage() {
     navigate(`/admin/edit/${serviceId}`);
   }
 
+  async function handleCopyServiceLink(serviceId) {
+    const link = `https://cnct.click/${String(serviceId || '').trim()}`;
+    if (!serviceId) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = link;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopyInfoModal({
+        link,
+        text: 'Ссылка скопирована. Размести её в описании и учёт клиентов станет проще',
+      });
+    } catch (e) {
+      console.error(e);
+      setCopyInfoModal({
+        link,
+        text: 'Не удалось автоматически скопировать. Скопируйте ссылку вручную и отправьте клиентке для записи.',
+      });
+    }
+  }
+
   async function handleDeleteService(serviceId) {
     const firstConfirm = window.confirm('Удалить этот сервис?');
     if (!firstConfirm) return;
@@ -860,6 +892,7 @@ function AdminPage() {
     return (
       <main className="admin-main">
         <p>Загрузка...</p>
+        <div class="loader"></div>
       </main>
     );
   }
@@ -1342,6 +1375,15 @@ function AdminPage() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    handleCopyServiceLink(service.id);
+                  }}
+                >
+                  <img src={copyIcon} />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleViewService(service.id);
                   }}
                 >
@@ -1563,6 +1605,30 @@ function AdminPage() {
                 onClick={() => setSelectedBooking(null)}
               >
                 Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {copyInfoModal && (
+        <div
+          className="logout-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setCopyInfoModal(null)}
+        >
+          <div className="logout-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Ссылка на коннект</h3>
+            <p>{copyInfoModal.text}</p>
+            <p style={{ marginTop: 10, wordBreak: 'break-all' }}>{copyInfoModal.link}</p>
+            <div className="logout-modal-actions">
+              <button
+                type="button"
+                className="logout-confirm-btn"
+                onClick={() => setCopyInfoModal(null)}
+              >
+                Понятно
               </button>
             </div>
           </div>
