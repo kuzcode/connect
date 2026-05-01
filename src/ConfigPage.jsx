@@ -2,10 +2,10 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { getConfigurationByIdPublic, createNote, listNotesByConfiguration, sendTelegramBookingNotification } from './appwriteClient.js';
 import NotFoundPage from './NotFoundPage.jsx';
+import { getMasterScheduleBundleFromOptions, getSlotsForMasterDay } from './scheduleUtils.js';
 import './admin.css';
 import stars from './icons/star.png'
 
-const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const MONTH_NAMES = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const DEFAULT_SERVICE_DURATION_MIN = 90;
 
@@ -23,9 +23,16 @@ function parseSettings(raw) {
   const requestFieldsOpt = opt.clientRequestFields && typeof opt.clientRequestFields === 'object' ? opt.clientRequestFields : {};
   const notificationsOpt = opt.notifications && typeof opt.notifications === 'object' ? opt.notifications : {};
 
+  const scheduleBundle = getMasterScheduleBundleFromOptions(opt);
+
   const masterList = [];
-  if (masterMode === 'me' && masterMe && (masterMe.name || masterMe.schedule)) {
-    masterList.push({ name: masterMe.name || 'Мастер', schedule: masterMe.schedule || {} });
+  if (masterMode === 'me' && masterMe && (masterMe.name || masterMe.schedule || masterMe.flexWindows)) {
+    masterList.push({
+      name: masterMe.name || 'Мастер',
+      schedule: scheduleBundle.scheduleMode === 'weekly' ? scheduleBundle.schedule : {},
+      scheduleMode: scheduleBundle.scheduleMode,
+      flexWindows: scheduleBundle.flexWindows,
+    });
   } else if (masterMode === 'one' && masterOne && (masterOne.name || masterOne.schedule)) {
     masterList.push({ name: masterOne.name || 'Мастер', schedule: masterOne.schedule || {} });
   } else if (masterMode === 'several') {
@@ -70,46 +77,6 @@ function parseSettings(raw) {
     masterList,
     services,
   };
-}
-
-function timeToMinutes(t) {
-  const [h, m] = (t || '00:00').toString().split(':').map(Number);
-  return (h || 0) * 60 + (m || 0);
-}
-
-function minutesToTime(min) {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-function getDayKey(date) {
-  const day = date.getDay();
-  return DAY_KEYS[day === 0 ? 6 : day - 1];
-}
-
-function getSlotsForDay(schedule, durationMinutes, existingNotesForDay, date) {
-  const dayKey = getDayKey(date);
-  const slot = schedule[dayKey];
-  if (!slot || slot.closed) return [];
-  const startMin = timeToMinutes(slot.start);
-  const endMin = timeToMinutes(slot.end);
-  const breaks = (slot.breaks || []).map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
-  const step = 30;
-  const slots = [];
-  for (let min = startMin; min + durationMinutes <= endMin; min += step) {
-    const slotEnd = min + durationMinutes;
-    const inBreak = breaks.some((b) => min < b.end && slotEnd > b.start);
-    if (inBreak) continue;
-    const overlapNote = existingNotesForDay.some((note) => {
-      const noteStart = timeToMinutes(note.timeLocal);
-      const noteEnd = noteStart + (note.durationMinutes || DEFAULT_SERVICE_DURATION_MIN);
-      return min < noteEnd && slotEnd > noteStart;
-    });
-    if (overlapNote) continue;
-    slots.push(minutesToTime(min));
-  }
-  return slots;
 }
 
 function ConfigPage() {
@@ -235,12 +202,17 @@ function ConfigPage() {
   }, [notes, calendarMonth.year, calendarMonth.month, selectedDay]);
 
   const schedule = activeMaster ? activeMaster.schedule : {};
+  const scheduleMode = activeMaster?.scheduleMode === 'flex' ? 'flex' : 'weekly';
+  const flexWindows = activeMaster?.flexWindows || [];
   const slots = useMemo(() => {
     if (!selectedDay) return [];
     const d = new Date(calendarMonth.year, calendarMonth.month, selectedDay);
     const relevantNotes = notesForSelectedDate.filter((n) => !activeMaster || !n.master || n.master === activeMaster.name);
-    return getSlotsForDay(schedule, durationMinutes, relevantNotes, d);
-  }, [schedule, durationMinutes, selectedDay, calendarMonth, notesForSelectedDate, activeMaster]);
+    const bundle = scheduleMode === 'flex'
+      ? { scheduleMode: 'flex', schedule: {}, flexWindows }
+      : { scheduleMode: 'weekly', schedule, flexWindows: [] };
+    return getSlotsForMasterDay(bundle, durationMinutes, relevantNotes, d);
+  }, [schedule, scheduleMode, flexWindows, durationMinutes, selectedDay, calendarMonth, notesForSelectedDate, activeMaster]);
 
   const goNext = () => {
     if (step < stepOrder.length - 1) setStep((s) => s + 1);
@@ -306,7 +278,7 @@ function ConfigPage() {
       const notifyConfig = parsed?.notifications;
       if (notifyConfig?.telegramEnabled && (notifyConfig?.telegramChatId || notifyConfig?.telegramUsername)) {
         const notificationText = [
-          `Новая запись: ${parsed?.name || 'Коннект'}`,
+          `🌷 Новая запись: ${parsed?.name || 'Коннект'}`,
           `Клиент: ${name.trim() || '—'}`,
           selectedService?.name ? `Услуга: ${selectedService.name}` : '',
           `Дата и время: ${date.toLocaleString()}`,

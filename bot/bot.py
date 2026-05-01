@@ -36,7 +36,7 @@ if not (APPWRITE_PROJECT_ID and APPWRITE_DATABASE_ID and APPWRITE_API_KEY):
     raise RuntimeError("Set APPWRITE_PROJECT_ID, APPWRITE_DATABASE_ID, APPWRITE_API_KEY env vars for bot.")
 
 DB_PATH = os.getenv("PAYMENT_BOT_SQLITE_PATH", os.path.join(os.path.dirname(__file__), "payments.sqlite3"))
-
+ff
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="HTML")
 
 # Ожидаем ввод кода привязки после /start.
@@ -63,7 +63,6 @@ def handle_code(message):
             queries=[Query.equal("bindingCode", code)]
         )
 
-        # Newer Appwrite Python SDK returns a DocumentList object (not subscriptable).
         documents = getattr(result, "documents", None)
         if documents is None and isinstance(result, dict):
             documents = result.get("documents", [])

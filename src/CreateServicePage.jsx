@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -16,10 +16,19 @@ import {
   createTelegramStarsInvoiceLink,
   createConfigOrder,
 } from './appwriteClient.js';
+import {
+  DAY_KEYS,
+  defaultWeeklySchedule,
+  defaultDaySlot,
+  normalizeWeeklySchedule,
+  normalizeFlexWindows,
+  getMasterScheduleBundleFromOptions,
+  getLocalDateKey,
+  timeToMinutes,
+} from './scheduleUtils.js';
 import './admin.css';
 import star from './icons/star.png';
 
-const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const DAY_LABELS = { mon: 'ПН', tue: 'ВТ', wed: 'СР', thu: 'ЧТ', fri: 'ПТ', sat: 'СБ', sun: 'ВС' };
 
 const PURCHASE_PLANS = [
@@ -41,24 +50,6 @@ function clampEndAfterStart(start, end) {
 }
 function clampStartBeforeEnd(start, end) {
   return timeLessOrEqual(start, end) ? start : end;
-}
-
-function defaultDaySlot() {
-  return { start: '09:00', end: '18:00', closed: false, breaks: [] };
-}
-
-function defaultSchedule() {
-  return DAY_KEYS.reduce((acc, key) => ({ ...acc, [key]: defaultDaySlot() }), {});
-}
-
-function defaultStaff() {
-  return {
-    name: '',
-    avatar: '',
-    description: '',
-    branchName: '',
-    schedule: defaultSchedule(),
-  };
 }
 
 const DURATION_OPTIONS = [
@@ -163,6 +154,99 @@ function ContactModalOverlay({ title, value, placeholder, onChangeValue, onSave,
   return createPortal(content, document.body);
 }
 
+function formatRuWeekdayDate(dateKey) {
+  const [y, mo, d] = String(dateKey).split('-').map(Number);
+  if (!y || !mo || !d) return dateKey;
+  const dt = new Date(y, mo - 1, d);
+  try {
+    return dt.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  } catch {
+    return dateKey;
+  }
+}
+
+function groupFlexWindowsByDate(windows) {
+  const norm = normalizeFlexWindows(windows);
+  const map = new Map();
+  for (const w of norm) {
+    if (!map.has(w.date)) map.set(w.date, []);
+    map.get(w.date).push(w);
+  }
+  return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+function FlexSlotModalOverlay({
+  date,
+  start,
+  end,
+  minDate,
+  error,
+  onDateChange,
+  onStartChange,
+  onEndChange,
+  onSave,
+  onClose,
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  const content = (
+    <div className="modal-overlay" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-title">Свободное окно</h3>
+        <div className="modal-row modal-row-stack">
+          <label>
+            <span className="modal-label">День</span>
+            <input
+              type="date"
+              className="branch-input"
+              min={minDate}
+              value={date}
+              onChange={(e) => onDateChange(e.target.value)}
+            />
+          </label>
+          <label>
+            <span className="modal-label">Начало</span>
+            <input type="time" className="branch-input" value={start} onChange={(e) => onStartChange(e.target.value)} />
+          </label>
+          <label>
+            <span className="modal-label">Конец</span>
+            <input type="time" className="branch-input" value={end} onChange={(e) => onEndChange(e.target.value)} />
+          </label>
+        </div>
+        {error ? <p className="submit-error" style={{ marginTop: 8 }}>{error}</p> : null}
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>Отмена</button>
+          <button type="button" className="primary-button" onClick={onSave}>Добавить</button>
+        </div>
+      </div>
+    </div>
+  );
+  return createPortal(content, document.body);
+}
+
+function buildMasterMeForPersist(me) {
+  const name = String(me?.name || '').trim();
+  const avatar = String(me?.avatar || '').trim();
+  if (me?.scheduleMode === 'flex') {
+    return {
+      name,
+      avatar,
+      scheduleMode: 'flex',
+      flexWindows: normalizeFlexWindows(me.flexWindows || []),
+    };
+  }
+  return {
+    name,
+    avatar,
+    scheduleMode: 'weekly',
+    schedule: normalizeWeeklySchedule(me?.schedule || defaultWeeklySchedule()),
+  };
+}
+
 function CreateServicePage() {
   const navigate = useNavigate();
   const { configId: routeConfigId } = useParams();
@@ -174,10 +258,13 @@ function CreateServicePage() {
   const [description, setDescription] = useState('');
 
   const [masterMode] = useState('me');
-  const [masterMe, setMasterMe] = useState({ name: '', avatar: '', schedule: defaultSchedule() });
-  const [masterOne, setMasterOne] = useState({ name: '', avatar: '', schedule: defaultSchedule() });
-  const [masters, setMasters] = useState([defaultStaff()]);
-  const [workSchedule, setWorkSchedule] = useState(defaultSchedule());
+  const [masterMe, setMasterMe] = useState({
+    name: '',
+    avatar: '',
+    scheduleMode: 'weekly',
+    schedule: defaultWeeklySchedule(),
+    flexWindows: [],
+  });
   const [breakModal, setBreakModal] = useState(null); // { dayKey, breakIndex }
   const [breakEdit, setBreakEdit] = useState({ start: '13:00', end: '14:00' });
 
@@ -227,8 +314,27 @@ function CreateServicePage() {
   const [paySubmitting, setPaySubmitting] = useState(false);
   const [telegramWaiting, setTelegramWaiting] = useState(false);
   const [telegramInvoiceUrl, setTelegramInvoiceUrl] = useState('');
+  const [flexModalOpen, setFlexModalOpen] = useState(false);
+  const [flexForm, setFlexForm] = useState({
+    date: getLocalDateKey(new Date()),
+    start: '10:00',
+    end: '11:00',
+  });
+  const [flexFormError, setFlexFormError] = useState('');
+  const telegramBindingInitRef = useRef(false);
 
   const trimmedId = configId.trim();
+  const telegramBindStorageKey = useCallback(() => {
+    if (isEditMode && routeConfigId) return `cnct_tg_bind_${routeConfigId}`;
+    const id = trimmedId;
+    if (id) return `cnct_tg_bind_${id}`;
+    return null;
+  }, [isEditMode, routeConfigId, trimmedId]);
+
+  const telegramLinked = useMemo(
+    () => Boolean(String(telegramNotificationsChatId || '').trim()),
+    [telegramNotificationsChatId],
+  );
 
   async function handleApplyPromo() {
     const v = promoCode.trim();
@@ -308,26 +414,17 @@ function CreateServicePage() {
           setName(parsed.name || '');
           setDescription(parsed.description || '');
           const opt = parsed.options;
-          const sourceSchedule = (
-            (opt.masterMe?.schedule && typeof opt.masterMe.schedule === 'object' && opt.masterMe.schedule)
-            || (opt.masterOne?.schedule && typeof opt.masterOne.schedule === 'object' && opt.masterOne.schedule)
-            || (Array.isArray(opt.masters) && opt.masters[0]?.schedule && typeof opt.masters[0].schedule === 'object' && opt.masters[0].schedule)
-          );
-          setWorkSchedule(
-            sourceSchedule
-              ? DAY_KEYS.reduce((acc, key) => ({
-                ...acc,
-                [key]: {
-                  start: sourceSchedule[key]?.start ?? '09:00',
-                  end: sourceSchedule[key]?.end ?? '18:00',
-                  closed: Boolean(sourceSchedule[key]?.closed),
-                  breaks: Array.isArray(sourceSchedule[key]?.breaks)
-                    ? sourceSchedule[key].breaks.map((b) => ({ start: b.start ?? '13:00', end: b.end ?? '14:00' }))
-                    : [],
-                },
-              }), {})
-              : defaultSchedule(),
-          );
+          const bundle = getMasterScheduleBundleFromOptions(opt);
+          const mm = opt.masterMe && typeof opt.masterMe === 'object' ? opt.masterMe : {};
+          setMasterMe({
+            name: typeof mm.name === 'string' ? mm.name : '',
+            avatar: typeof mm.avatar === 'string' ? mm.avatar : '',
+            scheduleMode: bundle.scheduleMode,
+            schedule: bundle.scheduleMode === 'weekly'
+              ? bundle.schedule
+              : defaultWeeklySchedule(),
+            flexWindows: bundle.scheduleMode === 'flex' ? bundle.flexWindows : [],
+          });
           if (Array.isArray(opt.services) && opt.services.length > 0) {
             setServices(
               opt.services.map((s) => ({
@@ -392,10 +489,6 @@ function CreateServicePage() {
       cancelled = true;
     };
   }, [isEditMode, routeConfigId]);
-
-  useEffect(() => {
-    setMasterMe((prev) => ({ ...prev, schedule: workSchedule || defaultSchedule() }));
-  }, [workSchedule]);
 
   useEffect(() => {
     if (addedServiceIndex === null) return;
@@ -463,6 +556,11 @@ function CreateServicePage() {
       return;
     }
 
+    if (masterMe.scheduleMode === 'flex' && normalizeFlexWindows(masterMe.flexWindows || []).length === 0) {
+      setSubmitError('Добавьте хотя бы одно окно в свободном графике');
+      return;
+    }
+
     if (!safeId) {
       setSubmitError('ID обязателен');
       return;
@@ -476,16 +574,12 @@ function CreateServicePage() {
     try {
       setSubmitting(true);
 
-      const scheduleToSave = masterMe.schedule || workSchedule || defaultSchedule();
-
       const settingsObject = {
         name: safeName,
         description: description.trim(),
         options: {
           masterMode: 'me',
-          masterMe: { name: '', avatar: '', schedule: scheduleToSave },
-          masterOne: { name: '', avatar: '', schedule: defaultSchedule() },
-          masters: [],
+          masterMe: buildMasterMeForPersist(masterMe),
           contacts: {
             address: contacts.address.trim(),
             instagram: contacts.instagram.trim(),
@@ -602,13 +696,38 @@ function CreateServicePage() {
   }, [telegramWaiting, payDraftConfig, navigate]);
 
   useEffect(() => {
-    handleGenerateTelegramBindingCode({ resetChatId: false });
-  }, [telegramNotificationsEnabled]);
+    telegramBindingInitRef.current = false;
+  }, [trimmedId, routeConfigId, isEditMode]);
 
   useEffect(() => {
-    if (!telegramNotificationsEnabled) return;
-    if (telegramBindingLoading) return;
-  }, [telegramNotificationsEnabled, telegramNotificationsChatId, telegramBindingCode, telegramBindingLoading]);
+    if (!telegramNotificationsEnabled || telegramLinked) {
+      telegramBindingInitRef.current = false;
+      return;
+    }
+    const key = telegramBindStorageKey();
+    if (!key) return;
+    if (telegramBindingInitRef.current) return;
+
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored && /^\d{6}$/.test(String(stored).trim())) {
+        setTelegramBindingCode(String(stored).trim());
+        telegramBindingInitRef.current = true;
+        return;
+      }
+    } catch {
+      // ignore
+    }
+
+    telegramBindingInitRef.current = true;
+    void handleGenerateTelegramBindingCode({ resetChatId: false }).catch(() => {
+      telegramBindingInitRef.current = false;
+    });
+  }, [
+    telegramNotificationsEnabled,
+    telegramLinked,
+    telegramBindStorageKey,
+  ]);
 
   useEffect(() => {
     if (window.location.hash !== '#telegram-binding') return;
@@ -737,6 +856,14 @@ function CreateServicePage() {
 
       setTelegramNotificationsChatId(String(idNum));
       setTelegramBindingStatus('Аккаунт успешно привязан');
+      const k = telegramBindStorageKey();
+      if (k) {
+        try {
+          localStorage.removeItem(k);
+        } catch {
+          // ignore
+        }
+      }
     } catch (e) {
       console.error(e);
       setTelegramBindingStatus('Ошибка проверки привязки Telegram.');
@@ -751,16 +878,49 @@ function CreateServicePage() {
       if (reset) {
         setTelegramNotificationsChatId('');
         setTelegramBindingCode('');
+        const k0 = telegramBindStorageKey();
+        if (k0) {
+          try {
+            localStorage.removeItem(k0);
+          } catch {
+            // ignore
+          }
+        }
       }
       const code = await createTelegramBindingCode();
       setTelegramBindingCode(code);
+      const k = telegramBindStorageKey();
+      if (k) {
+        try {
+          localStorage.setItem(k, code);
+        } catch {
+          // ignore
+        }
+      }
       setTelegramBindingStatus('Код сгенерирован. Открой бота и введи эти 6 цифр.');
     } catch (e) {
       console.error(e);
       setTelegramBindingStatus(e?.message || 'Не удалось сгенерировать код привязки Telegram.');
+      throw e;
     } finally {
       setTelegramBindingLoading(false);
     }
+  }
+
+  async function handleUnlinkTelegram() {
+    setTelegramNotificationsChatId('');
+    setTelegramBindingStatus('');
+    setTelegramBindingCode('');
+    const k = telegramBindStorageKey();
+    if (k) {
+      try {
+        localStorage.removeItem(k);
+      } catch {
+        // ignore
+      }
+    }
+    telegramBindingInitRef.current = false;
+    await handleGenerateTelegramBindingCode({ resetChatId: false });
   }
 
   return (
@@ -863,98 +1023,170 @@ function CreateServicePage() {
               <span className="field-title" style={{ marginBottom: 4 }}>Рабочее время</span>
               <span className="field-badge field-badge">Обязательно</span>
             </div>
-            <div className="schedule-section">
-              <div className="schedule-grid">
-                {DAY_KEYS.map((dayKey) => {
-                  const slot = (masterMe.schedule || defaultSchedule())[dayKey] || defaultDaySlot();
-                  return (
-                    <div key={dayKey} className="schedule-day">
-                      <span className="schedule-day-label">{DAY_LABELS[dayKey]}</span>
-                      <label className="schedule-closed">
-                        <input
-                          type="checkbox"
-                          checked={slot.closed}
-                          onChange={(e) => {
-                            const closed = e.target.checked;
-                            setMasterMe((prev) => ({
-                              ...prev,
-                              schedule: {
-                                ...(prev.schedule || defaultSchedule()),
-                                [dayKey]: { ...slot, closed, breaks: closed ? [] : slot.breaks },
-                              },
-                            }));
-                          }}
-                        />
-                        <span>Выходной</span>
-                      </label>
-                      {!slot.closed && (
-                        <>
-                          <input
-                            type="time"
-                            value={slot.start}
-                            onChange={(e) => {
-                              const newStart = e.target.value;
-                              const newEnd = timeLessOrEqual(newStart, slot.end) ? slot.end : newStart;
-                              setMasterMe((prev) => ({
-                                ...prev,
-                                schedule: {
-                                  ...(prev.schedule || defaultSchedule()),
-                                  [dayKey]: { ...slot, start: newStart, end: newEnd },
-                                },
-                              }));
-                            }}
-                            className="schedule-time"
-                          />
-                          <input
-                            type="time"
-                            value={slot.end}
-                            onChange={(e) => {
-                              const newEnd = e.target.value;
-                              const newStart = timeLessOrEqual(slot.start, newEnd) ? slot.start : newEnd;
-                              setMasterMe((prev) => ({
-                                ...prev,
-                                schedule: {
-                                  ...(prev.schedule || defaultSchedule()),
-                                  [dayKey]: { ...slot, start: newStart, end: newEnd },
-                                },
-                              }));
-                            }}
-                            className="schedule-time"
-                          />
-                        </>
-                      )}
-                      <div className="schedule-breaks">
-                        {slot.breaks.map((br, bi) => (
-                          <button
-                            key={bi}
-                            type="button"
-                            className="schedule-break-chip"
-                            onClick={() => {
-                              setBreakEdit({ start: br.start, end: br.end });
-                              setBreakModal({ staffIndex: 'me', dayKey, breakIndex: bi });
-                            }}
-                          >
-                            Перерыв {br.start}–{br.end}
-                          </button>
-                        ))}
-                        {!slot.closed && (
-                          <button
-                            type="button"
-                            className="schedule-add-break"
-                            onClick={() => {
-                              setBreakEdit({ start: '13:00', end: '14:00' });
-                              setBreakModal({ staffIndex: 'me', dayKey });
-                            }}
-                          >
-                            + перерыв
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+
+            <div className="segmented-control schedule-mode-switch" role="tablist" aria-label="Тип графика работы">
+              <button
+                type="button"
+                className={`segment ${masterMe.scheduleMode === 'weekly' ? 'active' : ''}`}
+                onClick={() => setMasterMe((prev) => ({ ...prev, scheduleMode: 'weekly' }))}
+              >
+                По дням недели
+              </button>
+              <button
+                type="button"
+                className={`segment ${masterMe.scheduleMode === 'flex' ? 'active' : ''}`}
+                onClick={() => setMasterMe((prev) => ({ ...prev, scheduleMode: 'flex' }))}
+              >
+                Свободный график
+              </button>
             </div>
+
+            {masterMe.scheduleMode === 'weekly' ? (
+              <div className="schedule-section">
+                <div className="schedule-grid">
+                  {DAY_KEYS.map((dayKey) => {
+                    const slot = (masterMe.schedule || defaultWeeklySchedule())[dayKey] || defaultDaySlot();
+                    return (
+                      <div key={dayKey} className="schedule-day">
+                        <span className="schedule-day-label">{DAY_LABELS[dayKey]}</span>
+                        <label className="schedule-closed">
+                          <input
+                            type="checkbox"
+                            checked={slot.closed}
+                            onChange={(e) => {
+                              const closed = e.target.checked;
+                              setMasterMe((prev) => ({
+                                ...prev,
+                                schedule: {
+                                  ...(prev.schedule || defaultWeeklySchedule()),
+                                  [dayKey]: { ...slot, closed, breaks: closed ? [] : slot.breaks },
+                                },
+                              }));
+                            }}
+                          />
+                          <span>Выходной</span>
+                        </label>
+                        {!slot.closed && (
+                          <>
+                            <input
+                              type="time"
+                              value={slot.start}
+                              onChange={(e) => {
+                                const newStart = e.target.value;
+                                const newEnd = timeLessOrEqual(newStart, slot.end) ? slot.end : newStart;
+                                setMasterMe((prev) => ({
+                                  ...prev,
+                                  schedule: {
+                                    ...(prev.schedule || defaultWeeklySchedule()),
+                                    [dayKey]: { ...slot, start: newStart, end: newEnd },
+                                  },
+                                }));
+                              }}
+                              className="schedule-time"
+                            />
+                            <input
+                              type="time"
+                              value={slot.end}
+                              onChange={(e) => {
+                                const newEnd = e.target.value;
+                                const newStart = timeLessOrEqual(slot.start, newEnd) ? slot.start : newEnd;
+                                setMasterMe((prev) => ({
+                                  ...prev,
+                                  schedule: {
+                                    ...(prev.schedule || defaultWeeklySchedule()),
+                                    [dayKey]: { ...slot, start: newStart, end: newEnd },
+                                  },
+                                }));
+                              }}
+                              className="schedule-time"
+                            />
+                          </>
+                        )}
+                        <div className="schedule-breaks">
+                          {slot.breaks.map((br, bi) => (
+                            <button
+                              key={bi}
+                              type="button"
+                              className="schedule-break-chip"
+                              onClick={() => {
+                                setBreakEdit({ start: br.start, end: br.end });
+                                setBreakModal({ dayKey, breakIndex: bi });
+                              }}
+                            >
+                              Перерыв {br.start}–{br.end}
+                            </button>
+                          ))}
+                          {!slot.closed && (
+                            <button
+                              type="button"
+                              className="schedule-add-break"
+                              onClick={() => {
+                                setBreakEdit({ start: '13:00', end: '14:00' });
+                                setBreakModal({ dayKey });
+                              }}
+                            >
+                              + перерыв
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-schedule-section">
+                <button
+                  type="button"
+                  className="add-branch-btn"
+                  onClick={() => {
+                    setFlexFormError('');
+                    setFlexForm({
+                      date: getLocalDateKey(new Date()),
+                      start: '10:00',
+                      end: '11:00',
+                    });
+                    setFlexModalOpen(true);
+                  }}
+                >
+                  Добавить окошко
+                </button>
+
+                {groupFlexWindowsByDate(masterMe.flexWindows || []).length === 0 ? (
+                  <p className="field-help" style={{ marginTop: 10 }}>
+                    Добавь окно — это время, в которое клиент сможет записаться.
+                  </p>
+                ) : (
+                  <div className="flex-windows-blocks">
+                    {groupFlexWindowsByDate(masterMe.flexWindows || []).map(([dateKey, wins]) => (
+                      <div key={dateKey} className="flex-window-block">
+                        <div className="flex-window-block-title">{formatRuWeekdayDate(dateKey)}</div>
+                        <div className="flex-window-block-times">
+                          {wins.map((w) => (
+                            <div key={w.id} className="flex-window-period-row">
+                              <span>{w.start} — {w.end}</span>
+                              <button
+                                type="button"
+                                className="flex-window-remove"
+                                aria-label="Удалить окно"
+                                onClick={() => {
+                                  setMasterMe((prev) => ({
+                                    ...prev,
+                                    flexWindows: (prev.flexWindows || []).filter((x) => x.id !== w.id),
+                                  }));
+                                }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="field field-services">
@@ -1182,6 +1414,20 @@ function CreateServicePage() {
             </label>
             {!telegramNotificationsEnabled ? (
               <p className="field-help">Ты не будешь получать уведомления о записях.</p>
+            ) : telegramLinked ? (
+              <div>
+                <p className="field-help">Аккаунт Telegram привязан — уведомления о записях приходят сюда.</p>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  style={{ marginTop: 8 }}
+                  disabled={telegramBindingLoading}
+                  onClick={() => void handleUnlinkTelegram()}
+                >
+                  {telegramBindingLoading ? 'Секунду...' : 'Отвязать аккаунт'}
+                </button>
+                {telegramBindingStatus ? <p className="field-help">{telegramBindingStatus}</p> : null}
+              </div>
             ) : (
               <div>
                 <p className="field-help">Для того, чтобы получать уведомления о новых записях в Telegram, нужно привязать свой аккаунт. Для этого <a href="https://t.me/connect_booking_bot">перейдите в бота</a> и отправьте одним сообщением 6 цифр, указанных ниже.</p>
@@ -1250,35 +1496,16 @@ function CreateServicePage() {
               end={breakEdit.end}
               canDelete={typeof breakModal.breakIndex === 'number'}
               onDelete={() => {
-                const { staffIndex, dayKey, breakIndex } = breakModal;
+                const { dayKey, breakIndex } = breakModal;
                 if (typeof breakIndex !== 'number') return;
 
-                if (staffIndex === 'me') {
-                  setMasterMe((prev) => {
-                    const sched = { ...(prev.schedule || defaultSchedule()) };
-                    const day = { ...sched[dayKey], breaks: [...(sched[dayKey]?.breaks || [])] };
-                    day.breaks = day.breaks.filter((_, i) => i !== breakIndex);
-                    sched[dayKey] = day;
-                    return { ...prev, schedule: sched };
-                  });
-                } else if (staffIndex === 'one') {
-                  setMasterOne((prev) => {
-                    const sched = { ...(prev.schedule || defaultSchedule()) };
-                    const day = { ...sched[dayKey], breaks: [...(sched[dayKey]?.breaks || [])] };
-                    day.breaks = day.breaks.filter((_, i) => i !== breakIndex);
-                    sched[dayKey] = day;
-                    return { ...prev, schedule: sched };
-                  });
-                } else {
-                  setMasters((prev) => prev.map((s, i) => {
-                    if (i !== staffIndex) return s;
-                    const sched = { ...s.schedule };
-                    const day = { ...sched[dayKey], breaks: [...(sched[dayKey]?.breaks || [])] };
-                    day.breaks = day.breaks.filter((_, idx) => idx !== breakIndex);
-                    sched[dayKey] = day;
-                    return { ...s, schedule: sched };
-                  }));
-                }
+                setMasterMe((prev) => {
+                  const sched = { ...(prev.schedule || defaultWeeklySchedule()) };
+                  const day = { ...sched[dayKey], breaks: [...(sched[dayKey]?.breaks || [])] };
+                  day.breaks = day.breaks.filter((_, i) => i !== breakIndex);
+                  sched[dayKey] = day;
+                  return { ...prev, schedule: sched };
+                });
                 setBreakModal(null);
               }}
               onStartChange={(v) => setBreakEdit((prev) => ({
@@ -1292,44 +1519,68 @@ function CreateServicePage() {
                 start: timeLessOrEqual(prev.start, v) ? prev.start : v,
               }))}
               onSave={() => {
-                const { staffIndex, dayKey, breakIndex } = breakModal;
+                const { dayKey, breakIndex } = breakModal;
                 const isEdit = typeof breakIndex === 'number';
                 let end = breakEdit.end;
                 if (!timeLessOrEqual(breakEdit.start, end)) end = breakEdit.start;
                 const newBreak = { start: breakEdit.start, end };
 
-                if (staffIndex === 'me') {
-                  setMasterMe((prev) => {
-                    const sched = { ...(prev.schedule || defaultSchedule()) };
-                    const day = { ...sched[dayKey], breaks: [...(sched[dayKey]?.breaks || [])] };
-                    if (isEdit) day.breaks[breakIndex] = newBreak;
-                    else day.breaks.push(newBreak);
-                    sched[dayKey] = day;
-                    return { ...prev, schedule: sched };
-                  });
-                } else if (staffIndex === 'one') {
-                  setMasterOne((prev) => {
-                    const sched = { ...(prev.schedule || defaultSchedule()) };
-                    const day = { ...sched[dayKey], breaks: [...(sched[dayKey]?.breaks || [])] };
-                    if (isEdit) day.breaks[breakIndex] = newBreak;
-                    else day.breaks.push(newBreak);
-                    sched[dayKey] = day;
-                    return { ...prev, schedule: sched };
-                  });
-                } else {
-                  setMasters((prev) => prev.map((s, i) => {
-                    if (i !== staffIndex) return s;
-                    const sched = { ...s.schedule };
-                    const day = { ...sched[dayKey], breaks: [...(sched[dayKey]?.breaks || [])] };
-                    if (isEdit) day.breaks[breakIndex] = newBreak;
-                    else day.breaks.push(newBreak);
-                    sched[dayKey] = day;
-                    return { ...s, schedule: sched };
-                  }));
-                }
+                setMasterMe((prev) => {
+                  const sched = { ...(prev.schedule || defaultWeeklySchedule()) };
+                  const day = { ...sched[dayKey], breaks: [...(sched[dayKey]?.breaks || [])] };
+                  if (isEdit) day.breaks[breakIndex] = newBreak;
+                  else day.breaks.push(newBreak);
+                  sched[dayKey] = day;
+                  return { ...prev, schedule: sched };
+                });
                 setBreakModal(null);
               }}
               onClose={() => setBreakModal(null)}
+            />
+          )}
+
+          {flexModalOpen && (
+            <FlexSlotModalOverlay
+              date={flexForm.date}
+              start={flexForm.start}
+              end={flexForm.end}
+              minDate={getLocalDateKey(new Date())}
+              error={flexFormError}
+              onDateChange={(v) => setFlexForm((p) => ({ ...p, date: v }))}
+              onStartChange={(v) => setFlexForm((p) => ({ ...p, start: v }))}
+              onEndChange={(v) => setFlexForm((p) => ({ ...p, end: v }))}
+              onClose={() => setFlexModalOpen(false)}
+              onSave={() => {
+                const d = String(flexForm.date || '').trim();
+                const st = String(flexForm.start || '').trim();
+                const en = String(flexForm.end || '').trim();
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+                  setFlexFormError('Выберите день');
+                  return;
+                }
+                const sm = timeToMinutes(st);
+                const em = timeToMinutes(en);
+                if (em <= sm) {
+                  setFlexFormError('Время окончания должно быть позже начала');
+                  return;
+                }
+                if (em - sm < 30) {
+                  setFlexFormError('Окно не короче 30 минут');
+                  return;
+                }
+                const todayKey = getLocalDateKey(new Date());
+                if (d < todayKey) {
+                  setFlexFormError('Нельзя добавлять окна в прошедшие дни');
+                  return;
+                }
+                const id = `fw_${d}_${st}_${en}_${Math.random().toString(36).slice(2, 9)}`;
+                setMasterMe((prev) => ({
+                  ...prev,
+                  flexWindows: [...(prev.flexWindows || []), { id, date: d, start: st, end: en }],
+                }));
+                setFlexFormError('');
+                setFlexModalOpen(false);
+              }}
             />
           )}
 

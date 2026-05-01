@@ -67,6 +67,38 @@ function HomePage() {
               <p>получить страницу</p>
             </button>
           </div>
+
+          <p className='bot'>о коннекте ↓</p>
+        </div>
+
+        <div className="white">
+          <div className="l">
+            <h3>Автоматический учёт свободных окошек ⏰</h3>
+            <p>Выбери рабочее время и система сама будет предлагать свободные окошки клиенткам</p>
+          </div>
+          <div className="r">
+            <h3>Комфортный дизайн 🌸</h3>
+            <p>Пользоваться Коннектом приятно и мастерицам, и клиенткам</p>
+          </div>
+          <div className="l">
+            <h3>Пример страницы 🧩</h3>
+            <p>Пример Коннекта: <a href="https://cnct.click/anyuta">cnct.click/anyuta</a>. Это то, что увидят желающие записаться</p>
+          </div>
+          <div className="r">
+            <h3>Уведомления в Telegram 🔔</h3>
+            <p>Моментально оповестим о новой записи</p>
+          </div>
+          <div className="l">
+            <h3>Самый дешёвый 🏆</h3>
+            <p>Коннект стоит в 2-3 раза дешевле конкурентов — 500₽ в месяц</p>
+          </div>
+
+
+          <div className="last">
+            <h3>Заходи к нам!</h3>
+            <p><a href="/admin">зарегистрироватья</a></p>
+            <div class="loader"></div>
+          </div>
         </div>
       </main>
     </body>

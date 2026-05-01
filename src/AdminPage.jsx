@@ -6,6 +6,7 @@ import {
   loginAdmin,
   getAdminByEmail,
   getConfigurationById,
+  updateConfigurationByConfigId,
   listNotesByConfigurationTimeRange,
   logoutCurrentSession,
   deleteConfigurationByConfigId,
@@ -13,6 +14,13 @@ import {
   createTelegramStarsInvoiceLink,
   deleteNoteById,
 } from './appwriteClient.js';
+import {
+  getMasterScheduleBundleFromOptions,
+  getFlexDayTimelineBounds,
+  getLocalDateKey,
+  pruneFlexWindowsBeforeToday,
+  settingsJsonWithPrunedFlexWindows,
+} from './scheduleUtils.js';
 import './admin.css';
 import edit from './icons/edit.png'
 import delet from './icons/delete.png'
@@ -33,7 +41,7 @@ function timeToMinutes(t) {
   return (Number(h) || 0) * 60 + (Number(m) || 0);
 }
 
-function getWorkScheduleFromSettings(rawSettings) {
+function getWorkSchedulePackFromSettings(rawSettings) {
   if (!rawSettings) return null;
   let obj = rawSettings;
   if (typeof rawSettings === 'string') {
@@ -46,22 +54,13 @@ function getWorkScheduleFromSettings(rawSettings) {
   if (!obj || typeof obj !== 'object') return null;
 
   const opt = obj.options && typeof obj.options === 'object' ? obj.options : {};
-  const masterMode = opt.masterMode || 'me';
-  const masterMe = opt.masterMe && typeof opt.masterMe === 'object' ? opt.masterMe : null;
-  const masterOne = opt.masterOne && typeof opt.masterOne === 'object' ? opt.masterOne : null;
-  const mastersList = Array.isArray(opt.masters) ? opt.masters : [];
+  const bundle = getMasterScheduleBundleFromOptions(opt);
 
-  const scheduleSource = (() => {
-    if (masterMode === 'me' && masterMe?.schedule && typeof masterMe.schedule === 'object') return masterMe.schedule;
-    if (masterMode === 'one' && masterOne?.schedule && typeof masterOne.schedule === 'object') return masterOne.schedule;
-    if (Array.isArray(mastersList) && mastersList[0]?.schedule && typeof mastersList[0].schedule === 'object') {
-      return mastersList[0].schedule;
-    }
-    return null;
-  })();
+  if (bundle.scheduleMode === 'flex') {
+    return { mode: 'flex', weekly: null, flexWindows: bundle.flexWindows };
+  }
 
-  if (!scheduleSource) return null;
-
+  const scheduleSource = bundle.schedule;
   const result = {};
   for (const key of DAY_KEYS) {
     const slot = scheduleSource[key] || {};
@@ -82,7 +81,7 @@ function getWorkScheduleFromSettings(rawSettings) {
     };
   }
 
-  return result;
+  return { mode: 'weekly', weekly: result, flexWindows: [] };
 }
 
 function getServiceDurationsFromSettings(rawSettings) {
@@ -157,10 +156,6 @@ function getNotificationsFromSettings(rawSettings) {
     telegramChatId: typeof notifications.telegramChatId === 'string' ? notifications.telegramChatId : '',
     telegramUsername: typeof notifications.telegramUsername === 'string' ? notifications.telegramUsername : '',
   };
-}
-
-function getLocalDateKey(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function pad2(n) {
@@ -292,6 +287,47 @@ function AdminPage() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (!admin?.owns?.length) return undefined;
+    let cancelled = false;
+
+    (async () => {
+      for (const item of admin.owns) {
+        if (cancelled) return;
+        const configId = typeof item === 'string' ? item : item.id || item.configId;
+        if (!configId) continue;
+        try {
+          const doc = await getConfigurationById(configId);
+          const raw = doc?.settings;
+          let obj = raw;
+          if (typeof raw === 'string') {
+            try {
+              obj = JSON.parse(raw);
+            } catch {
+              continue;
+            }
+          }
+          if (!obj || typeof obj !== 'object' || !obj.options) continue;
+          const bundle = getMasterScheduleBundleFromOptions(obj.options);
+          if (bundle.scheduleMode !== 'flex') continue;
+          const pruned = pruneFlexWindowsBeforeToday(bundle.flexWindows);
+          const nextJson = settingsJsonWithPrunedFlexWindows(raw, pruned);
+          if (!nextJson) continue;
+          await updateConfigurationByConfigId(configId, {
+            settings: nextJson,
+            name: typeof doc.name === 'string' ? doc.name : (obj.name || configId),
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [admin]);
+
   const adminBalanceStars = Number(admin?.balance) || 0;
 
   async function handleBalanceTopup() {
@@ -381,7 +417,7 @@ function AdminPage() {
             serviceDurations: getServiceDurationsFromSettings(raw),
             servicePrices: getServicePricesFromSettings(raw),
             notifications: getNotificationsFromSettings(raw),
-            workSchedule: getWorkScheduleFromSettings(raw),
+            workSchedulePack: getWorkSchedulePackFromSettings(raw),
           });
         } catch (e) {
           console.error(e);
@@ -561,7 +597,7 @@ function AdminPage() {
     const selected = ownedConfigs.find((c) => c.id === selectedConnectId) || null;
     if (!selected) return null;
 
-    if (selected.configDocId && selected.serviceDurations && selected.servicePrices && selected.notifications && selected.workSchedule) return selected;
+    if (selected.configDocId && selected.serviceDurations && selected.servicePrices && selected.notifications && selected.workSchedulePack) return selected;
 
     
     
@@ -570,15 +606,15 @@ function AdminPage() {
       const raw = doc?.settings;
       const serviceDurations = getServiceDurationsFromSettings(raw);
       const servicePrices = getServicePricesFromSettings(raw);
-      const workSchedule = getWorkScheduleFromSettings(raw);
+      const workSchedulePack = getWorkSchedulePackFromSettings(raw);
       const notifications = getNotificationsFromSettings(raw);
 
       setOwnedConfigs((prev) => prev.map((c) => {
         if (c.id !== selected.id) return c;
-        return { ...c, configDocId: doc.$id, serviceDurations, servicePrices, notifications, workSchedule };
+        return { ...c, configDocId: doc.$id, serviceDurations, servicePrices, notifications, workSchedulePack };
       }));
 
-      return { ...selected, configDocId: doc.$id, serviceDurations, servicePrices, notifications, workSchedule };
+      return { ...selected, configDocId: doc.$id, serviceDurations, servicePrices, notifications, workSchedulePack };
     } catch (e) {
       console.error(e);
       return null;
@@ -930,12 +966,24 @@ function AdminPage() {
   })();
 
   const dayKeyForSchedule = getAdminDayKey(dayDateForSchedule);
-  const dayScheduleForRender = selectedConnectForRender?.workSchedule?.[dayKeyForSchedule] || {
-    start: '09:00',
-    end: '18:00',
-    closed: false,
-    breaks: [],
-  };
+  const schedulePack = selectedConnectForRender?.workSchedulePack;
+  const dayScheduleForRender = (() => {
+    const fallback = {
+      start: '09:00',
+      end: '18:00',
+      closed: false,
+      breaks: [],
+    };
+    if (!schedulePack) return fallback;
+    if (schedulePack.mode === 'flex') {
+      const bounds = getFlexDayTimelineBounds(schedulePack.flexWindows || [], getLocalDateKey(dayDateForSchedule));
+      if (!bounds) {
+        return { start: '09:00', end: '09:00', closed: true, breaks: [] };
+      }
+      return bounds;
+    }
+    return schedulePack.weekly?.[dayKeyForSchedule] || fallback;
+  })();
 
   const workingStartMin = timeToMinutes(dayScheduleForRender.start);
   const workingEndMin = timeToMinutes(dayScheduleForRender.end);
