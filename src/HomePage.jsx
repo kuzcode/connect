@@ -5,7 +5,7 @@ import { getCurrentUser } from './appwriteClient.js';
 import Lottie from 'lottie-react';
 import flower from './flower.json';
 import globe from './globe.json';
-import YandexMetrika from './YandexMetrika.jsx'
+import YandexMetrika from './YandexMetrika.jsx';
 
 function HomePage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
