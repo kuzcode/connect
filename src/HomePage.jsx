@@ -5,6 +5,7 @@ import { getCurrentUser } from './appwriteClient.js';
 import Lottie from 'lottie-react';
 import flower from './flower.json';
 import globe from './globe.json';
+import YandexMetrika from './YandexMetrika.jsx'
 
 function HomePage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -14,12 +15,10 @@ function HomePage() {
     async function check() {
       try {
         const current = await getCurrentUser();
-        // anonymous-сессии не имеют email — считаем пользователя неавторизованным
         if (current?.email) {
           navigate('/admin', { replace: true });
         }
       } catch {
-        // Не авторизован — просто показываем главную
       } finally {
         setCheckingAuth(false);
       }
@@ -37,6 +36,7 @@ function HomePage() {
 
   return (
     <body className='landing'>
+      <YandexMetrika />
       <header>
         <h2>Коннект</h2>
         <button onClick={() => navigate('/admin')}>
