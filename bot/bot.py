@@ -10,6 +10,7 @@ from appwrite.id import ID
 
 import requests
 import telebot
+from telebot import types
 
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8791958509:AAGJ_vNVBLCg9aBLKAaiMpGwHZtCk0QvxA0")
@@ -44,6 +45,17 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="HTML")
 awaiting_binding_code_until = {}
 BINDING_CODE_TTL_SECONDS = 10 * 60
 
+WELCOME_TEXT = (
+    "Регистрируйся на Коннекте 🌷\n"
+)
+SITE_URL = "https://cnct.click"
+
+
+def send_welcome(chat_id: int):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton(text="Открыть сайт", url=SITE_URL))
+    bot.send_message(chat_id, WELCOME_TEXT, reply_markup=markup)
+
 def _headers():
     return {
         "Content-Type": "application/json",
@@ -51,9 +63,7 @@ def _headers():
         "X-Appwrite-Key": APPWRITE_API_KEY,
     }
 
-@bot.message_handler(func=lambda message: bool(re.fullmatch(r'\d{6}', message.text.strip())))
-def handle_code(message):
-    code = message.text.strip()
+def process_binding_code(message, code: str):
     user_id = str(message.from_user.id)
 
     try:
@@ -209,6 +219,30 @@ def parse_invoice_payload(payload: str):
         return None
     kind = parts[0]
     return kind, parts
+
+
+@bot.message_handler(commands=["start"])
+def handle_start(message):
+    text = (message.text or "").strip()
+    parts = text.split(maxsplit=1)
+    payload = parts[1].strip() if len(parts) > 1 else ""
+    if payload:
+        # /start с данными (например код привязки) обрабатываем как полезную команду.
+        if re.fullmatch(r"\d{6}", payload):
+            process_binding_code(message, payload)
+            return
+        return
+    send_welcome(message.chat.id)
+
+
+@bot.message_handler(func=lambda message: bool(message.text and re.fullmatch(r'\d{6}', message.text.strip())))
+def handle_code(message):
+    process_binding_code(message, message.text.strip())
+
+
+@bot.message_handler(func=lambda message: bool(message.text and message.text.strip().startswith("/")))
+def handle_unknown_command(message):
+    send_welcome(message.chat.id)
 
 
 @bot.pre_checkout_query_handler(func=lambda q: True)
