@@ -5,7 +5,7 @@ import { getCurrentUser } from './appwriteClient.js';
 import Lottie from 'lottie-react';
 import flower from './flower.json';
 import globe from './globe.json';
-import YandexMetrika from './YandexMetrika.jsx';
+import { initYandexMetrika } from './yandexMetrika.js';
 
 function HomePage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -17,8 +17,11 @@ function HomePage() {
         const current = await getCurrentUser();
         if (current?.email) {
           navigate('/admin', { replace: true });
+          return;
         }
+        initYandexMetrika();
       } catch {
+        initYandexMetrika();
       } finally {
         setCheckingAuth(false);
       }
@@ -36,7 +39,6 @@ function HomePage() {
 
   return (
     <body className='landing'>
-      <YandexMetrika />
       <header>
         <h2>Коннект</h2>
         <button onClick={() => navigate('/admin')}>
