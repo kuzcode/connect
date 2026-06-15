@@ -256,7 +256,7 @@ export async function getTelegramBindingByCode(bindingCode) {
   return response.documents[0];
 }
 
-export async function createConfigOrder({ adminDocId, configId, name, settings, months }) {
+export async function createConfigOrder({ adminDocId, configId, name, settings, months, configDocId, type }) {
   const safeAdminDocId = String(adminDocId || '').trim();
   const safeConfigId = String(configId || '').trim();
   const safeName = String(name || '').trim();
@@ -266,19 +266,25 @@ export async function createConfigOrder({ adminDocId, configId, name, settings, 
   const nextMonths = Number.isFinite(safeMonths) && safeMonths > 0 ? safeMonths : 1;
 
   const settingsString = String(settings || '');
+  const safeType = type === 'renew' ? 'renew' : 'purchase';
+  const payload = {
+    adminDocId: safeAdminDocId,
+    configId: safeConfigId,
+    name: safeName,
+    settings: settingsString,
+    months: nextMonths,
+    status: 'pending',
+    type: safeType,
+  };
+
+  const safeConfigDocId = String(configDocId || '').trim();
+  if (safeConfigDocId) payload.configDocId = safeConfigDocId;
 
   return databases.createDocument(
     DATABASE_ID,
     CONFIG_ORDERS_COLLECTION_ID,
     ID.unique(),
-    {
-      adminDocId: safeAdminDocId,
-      configId: safeConfigId,
-      name: safeName,
-      settings: settingsString,
-      months: nextMonths,
-      status: 'pending',
-    },
+    payload,
   );
 }
 

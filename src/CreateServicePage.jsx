@@ -26,6 +26,10 @@ import {
   getLocalDateKey,
   timeToMinutes,
 } from './scheduleUtils.js';
+import {
+  parsePromoAmount,
+  computePayedUntilAfterDays,
+} from './promoUtils.js';
 import './admin.css';
 import star from './icons/star.png';
 
@@ -816,8 +820,14 @@ function CreateServicePage() {
 
   const selectedPlan = PURCHASE_PLANS.find((p) => p.months === payPlanMonths) || PURCHASE_PLANS[0];
   const baseStars = Number(selectedPlan?.stars) || 0;
-  const promoDiscountStarsInt = promoDoc?.amount != null ? Math.max(0, Math.floor(Number(promoDoc.amount) || 0)) : 0;
-  const requiredStarsInt = Math.max(0, Math.floor(baseStars - promoDiscountStarsInt));
+  const promoParsed = promoDoc?.amount != null ? parsePromoAmount(promoDoc.amount) : null;
+  const promoFreeDays = promoParsed?.kind === 'freeDays' ? promoParsed.days : 0;
+  const promoDiscountStarsInt = promoParsed?.kind === 'discount'
+    ? Math.max(0, promoParsed.stars)
+    : 0;
+  const requiredStarsInt = promoFreeDays > 0
+    ? 0
+    : Math.max(0, Math.floor(baseStars - promoDiscountStarsInt));
   const requiredRub = requiredStarsInt * STAR_TO_RUB_RATE;
 
   function addMonthsIso(months) {
@@ -826,9 +836,11 @@ function CreateServicePage() {
     return d.toISOString();
   }
 
-  async function createPaidConfig({ months }) {
+  async function createPaidConfig({ months, days }) {
     if (!payDraftConfig?.id || !payDraftConfig?.settingsString) return;
-    const payedUntilIso = addMonthsIso(months);
+    const payedUntilIso = days
+      ? computePayedUntilAfterDays(days)
+      : addMonthsIso(months);
     await createConfiguration({
       id: payDraftConfig.id,
       name: payDraftConfig.name,
@@ -839,13 +851,21 @@ function CreateServicePage() {
     navigate(`/${payDraftConfig.id}`);
   }
 
+  async function activateWithCurrentPromo() {
+    if (promoFreeDays > 0) {
+      await createPaidConfig({ days: promoFreeDays });
+    } else {
+      await createPaidConfig({ months: payPlanMonths });
+    }
+  }
+
   async function handlePayFromBalance() {
     if (!payAdminDoc || !payDraftConfig) return;
     setPayError(null);
     setPaySubmitting(true);
     try {
       if (requiredStarsInt <= 0) {
-        await createPaidConfig({ months: payPlanMonths });
+        await activateWithCurrentPromo();
         return;
       }
 
@@ -871,7 +891,7 @@ function CreateServicePage() {
     setPaySubmitting(true);
     try {
       if (requiredStarsInt <= 0) {
-        await createPaidConfig({ months: payPlanMonths });
+        await activateWithCurrentPromo();
         return;
       }
 
@@ -1690,7 +1710,7 @@ function CreateServicePage() {
                 Коннект сильно дешевле конкурентов!
               </p>
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+              <div style={{ display: promoFreeDays > 0 ? 'none' : 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
                 {PURCHASE_PLANS.map((p) => (
                   <button
                     key={p.months}
@@ -1737,11 +1757,19 @@ function CreateServicePage() {
               </div>
 
               <p style={{ margin: '0 0 10px', fontSize: 13, color: '#1d1d1f' }}>
-                <span style={{ fontFamily: 'sfb', fontWeight: 700 }}>{requiredStarsInt}</span>⭐
-                <span style={{ color: '#6e6e73' }}>
-                  {' '}
-                  ≈ {Math.round(requiredRub)}₽
-                </span>
+                {promoFreeDays > 0 ? (
+                  <>
+                    Бесплатно: <span style={{ fontFamily: 'sfb', fontWeight: 700 }}>{promoFreeDays}</span> дней
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontFamily: 'sfb', fontWeight: 700 }}>{requiredStarsInt}</span>⭐
+                    <span style={{ color: '#6e6e73' }}>
+                      {' '}
+                      ≈ {Math.round(requiredRub)}₽
+                    </span>
+                  </>
+                )}
               </p>
 
               {promoError ? (
@@ -1752,7 +1780,9 @@ function CreateServicePage() {
 
               {promoDoc ? (
                 <p style={{ margin: promoError ? '8px 0 0' : '10px 0 0', fontSize: 13, color: '#6e6e73' }}>
-                  Скидка применена: -{promoDiscountStarsInt} звёзд
+                  {promoFreeDays > 0
+                    ? `Промокод: ${promoFreeDays} дней бесплатно`
+                    : `Скидка применена: -${promoDiscountStarsInt} звёзд`}
                 </p>
               ) : null}
 
@@ -1767,7 +1797,7 @@ function CreateServicePage() {
               <div className="modal-actions" style={{ marginTop: 16 }}>
                 {!telegramWaiting && !paySubmitting ? (
                   <>
-                    {payAdminDoc && Number(payAdminDoc.balance) >= requiredStarsInt ? (
+                    {payAdminDoc && Number(payAdminDoc.balance) >= requiredStarsInt && requiredStarsInt > 0 ? (
                       <button
                         type="button"
                         className="secondary-button"
@@ -1781,7 +1811,9 @@ function CreateServicePage() {
                       className="primary-button"
                       onClick={() => handlePayViaTelegram()}
                     >
-                      {paySubmitting ? 'Открываем...' : 'Оплатить в Telegram'}
+                      {paySubmitting
+                        ? 'Открываем...'
+                        : (requiredStarsInt <= 0 ? 'Активировать' : 'Оплатить в Telegram')}
                     </button>
                   </>
                 ) : (

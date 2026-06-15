@@ -7,13 +7,24 @@ import {
   getAdminByEmail,
   getConfigurationById,
   updateConfigurationByConfigId,
+  updateConfigurationPayedUntilByDocId,
   listNotesByConfigurationTimeRange,
   logoutCurrentSession,
   deleteConfigurationByConfigId,
   removeOwnedConfigurationFromAdmin,
   createTelegramStarsInvoiceLink,
   deleteNoteById,
+  getPromoByValue,
+  updateAdminBalanceById,
+  createConfigOrder,
 } from './appwriteClient.js';
+import {
+  parsePromoAmount,
+  formatPayedUntilLabel,
+  getDaysUntilPayedUntil,
+  computeExtendedPayedUntil,
+  computePayedUntilAfterDays,
+} from './promoUtils.js';
 import {
   getMasterScheduleBundleFromOptions,
   getFlexDayTimelineBounds,
@@ -30,6 +41,15 @@ import copyIcon from './icons/copy.png'
 
 const DEFAULT_SERVICE_DURATION_MIN = 90;
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+const PURCHASE_PLANS = [
+  { months: 1, stars: 300, label: '30 дней' },
+  { months: 3, stars: 800, label: '3 месяца' },
+  { months: 6, stars: 1500, label: '6 месяцев' },
+  { months: 12, stars: 2800, label: '1 год' },
+];
+
+const STAR_TO_RUB_RATE = 1.8;
 
 function getAdminDayKey(date) {
   const day = date.getDay();
@@ -229,6 +249,19 @@ function AdminPage() {
   const [balanceTopupError, setBalanceTopupError] = useState(null);
   const [copyInfoModal, setCopyInfoModal] = useState(null);
 
+  const [renewTarget, setRenewTarget] = useState(null);
+  const [renewPlanMonths, setRenewPlanMonths] = useState(PURCHASE_PLANS[0]?.months || 1);
+  const [renewPromoCode, setRenewPromoCode] = useState('');
+  const [renewPromoDoc, setRenewPromoDoc] = useState(null);
+  const [renewPromoLoading, setRenewPromoLoading] = useState(false);
+  const [renewPromoError, setRenewPromoError] = useState(null);
+  const [renewPromoAttemptsLeft, setRenewPromoAttemptsLeft] = useState(3);
+  const [renewSubmitting, setRenewSubmitting] = useState(false);
+  const [renewError, setRenewError] = useState(null);
+  const [renewTelegramWaiting, setRenewTelegramWaiting] = useState(false);
+  const [renewTelegramInvoiceUrl, setRenewTelegramInvoiceUrl] = useState('');
+  const renewBaselinePayedUntilRef = useRef(null);
+
   useEffect(() => {
     async function init() {
       try {
@@ -257,13 +290,13 @@ function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (!showBalanceModal) return undefined;
+    if (!showBalanceModal && !renewTarget) return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [showBalanceModal]);
+  }, [showBalanceModal, renewTarget]);
 
   useEffect(() => {
     if (!user?.email) return undefined;
@@ -367,19 +400,203 @@ function AdminPage() {
     }
   }
 
+  function closeRenewModal() {
+    if (renewSubmitting || renewTelegramWaiting) return;
+    setRenewTarget(null);
+    setRenewPromoCode('');
+    setRenewPromoDoc(null);
+    setRenewPromoError(null);
+    setRenewPromoAttemptsLeft(3);
+    setRenewError(null);
+    setRenewTelegramWaiting(false);
+    setRenewTelegramInvoiceUrl('');
+    renewBaselinePayedUntilRef.current = null;
+  }
+
+  function openRenewModal(service) {
+    setRenewTarget(service);
+    setRenewPlanMonths(PURCHASE_PLANS[0]?.months || 1);
+    setRenewPromoCode('');
+    setRenewPromoDoc(null);
+    setRenewPromoError(null);
+    setRenewPromoAttemptsLeft(3);
+    setRenewError(null);
+    setRenewTelegramWaiting(false);
+    setRenewTelegramInvoiceUrl('');
+    renewBaselinePayedUntilRef.current = service?.payedUntil || null;
+  }
+
+  async function handleApplyRenewPromo() {
+    const v = renewPromoCode.trim();
+    setRenewPromoError(null);
+    if (!renewTarget) return;
+    if (renewPromoLoading) return;
+    if (renewPromoAttemptsLeft <= 0) {
+      setRenewPromoError('Лимит попыток промокода исчерпан');
+      return;
+    }
+    if (!v) {
+      setRenewPromoError('Введите промокод');
+      return;
+    }
+
+    setRenewPromoLoading(true);
+    try {
+      const doc = await getPromoByValue(v);
+      setRenewPromoDoc(doc);
+      setRenewPromoAttemptsLeft((x) => Math.max(0, x - 1));
+      if (!doc) setRenewPromoError('Промокод не найден');
+    } catch (e) {
+      setRenewPromoDoc(null);
+      setRenewPromoError(e?.message || 'Не удалось проверить промокод');
+      setRenewPromoAttemptsLeft((x) => Math.max(0, x - 1));
+    } finally {
+      setRenewPromoLoading(false);
+    }
+  }
+
+  async function applyRenewal({ months, days }) {
+    if (!renewTarget?.configDocId) return;
+    const nextIso = days
+      ? computePayedUntilAfterDays(days, renewTarget.payedUntil)
+      : computeExtendedPayedUntil(renewTarget.payedUntil, months);
+    await updateConfigurationPayedUntilByDocId(renewTarget.configDocId, nextIso);
+    setOwnedConfigs((prev) => prev.map((item) => (
+      item.id === renewTarget.id ? { ...item, payedUntil: nextIso } : item
+    )));
+    closeRenewModal();
+  }
+
+  const renewSelectedPlan = PURCHASE_PLANS.find((p) => p.months === renewPlanMonths) || PURCHASE_PLANS[0];
+  const renewBaseStars = Number(renewSelectedPlan?.stars) || 0;
+  const renewPromoParsed = renewPromoDoc?.amount != null ? parsePromoAmount(renewPromoDoc.amount) : null;
+  const renewPromoFreeDays = renewPromoParsed?.kind === 'freeDays' ? renewPromoParsed.days : 0;
+  const renewPromoDiscountStarsInt = renewPromoParsed?.kind === 'discount'
+    ? Math.max(0, renewPromoParsed.stars)
+    : 0;
+  const renewRequiredStarsInt = renewPromoFreeDays > 0
+    ? 0
+    : Math.max(0, Math.floor(renewBaseStars - renewPromoDiscountStarsInt));
+  const renewRequiredRub = renewRequiredStarsInt * STAR_TO_RUB_RATE;
+
+  async function handleRenewFromBalance() {
+    if (!renewTarget || !admin?.$id) return;
+    setRenewError(null);
+    setRenewSubmitting(true);
+    try {
+      if (renewRequiredStarsInt <= 0) {
+        if (renewPromoFreeDays > 0) {
+          await applyRenewal({ days: renewPromoFreeDays });
+        } else {
+          await applyRenewal({ months: renewPlanMonths });
+        }
+        return;
+      }
+
+      const currentBalance = Number(admin.balance) || 0;
+      if (currentBalance < renewRequiredStarsInt) {
+        setRenewError('Недостаточно звёзд на балансе');
+        return;
+      }
+
+      const nextBalance = Math.max(0, currentBalance - renewRequiredStarsInt);
+      await updateAdminBalanceById(admin.$id, nextBalance);
+      setAdmin((prev) => (prev ? { ...prev, balance: nextBalance } : prev));
+      await applyRenewal({ months: renewPlanMonths });
+    } catch (e) {
+      setRenewError(e?.message || 'Не удалось продлить');
+    } finally {
+      setRenewSubmitting(false);
+    }
+  }
+
+  async function handleRenewViaTelegram() {
+    if (!renewTarget || !admin?.$id) return;
+    setRenewError(null);
+    setRenewSubmitting(true);
+    try {
+      if (renewRequiredStarsInt <= 0) {
+        if (renewPromoFreeDays > 0) {
+          await applyRenewal({ days: renewPromoFreeDays });
+        } else {
+          await applyRenewal({ months: renewPlanMonths });
+        }
+        return;
+      }
+
+      const orderDoc = await createConfigOrder({
+        adminDocId: admin.$id,
+        configId: renewTarget.id,
+        name: renewTarget.name,
+        settings: '',
+        months: renewPlanMonths,
+        configDocId: renewTarget.configDocId,
+        type: 'renew',
+      });
+
+      const payload = `RENEW:${orderDoc.$id}`;
+      const url = await createTelegramStarsInvoiceLink({
+        payload,
+        title: 'Продление коннекта',
+        description: 'Telegram Stars',
+        stars: renewRequiredStarsInt,
+      });
+
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setRenewTelegramInvoiceUrl(url);
+      setRenewTelegramWaiting(true);
+    } catch (e) {
+      setRenewError(e?.message || 'Не удалось создать счёт');
+    } finally {
+      setRenewSubmitting(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!renewTelegramWaiting || !renewTarget?.configDocId) return undefined;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 40;
+    const baseline = renewBaselinePayedUntilRef.current;
+
+    const timer = setInterval(async () => {
+      attempts += 1;
+      try {
+        const doc = await getConfigurationById(renewTarget.id);
+        const nextPayedUntil = doc?.payedUntil || null;
+        const baselineTs = baseline ? new Date(baseline).getTime() : 0;
+        const nextTs = nextPayedUntil ? new Date(nextPayedUntil).getTime() : 0;
+        if (Number.isFinite(nextTs) && nextTs > baselineTs) {
+          clearInterval(timer);
+          if (cancelled) return;
+          setOwnedConfigs((prev) => prev.map((item) => (
+            item.id === renewTarget.id ? { ...item, payedUntil: nextPayedUntil } : item
+          )));
+          closeRenewModal();
+        }
+      } catch {
+        // ignore while waiting
+      }
+
+      if (attempts >= maxAttempts) {
+        clearInterval(timer);
+        if (cancelled) return;
+        setRenewTelegramWaiting(false);
+        setRenewError('Не дождались оплаты. Попробуйте позже.');
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [renewTelegramWaiting, renewTarget]);
+
   useEffect(() => {
     async function loadOwnedConfigs() {
       if (!admin || !Array.isArray(admin.owns) || !admin.owns.length) {
         setOwnedConfigs([]);
-        return;
-      }
-
-      const allHaveName = admin.owns.every((item) => item && typeof item.name === 'string' && item.name.trim());
-      if (allHaveName) {
-        setOwnedConfigs(admin.owns.map((item) => ({
-          id: item.id,
-          name: item.name,
-        })));
         return;
       }
 
@@ -395,27 +612,32 @@ function AdminPage() {
           const doc = await getConfigurationById(configId);
           const raw = doc.settings;
 
-          let nameFromSettings = '';
+          let nameFromSettings = typeof doc.name === 'string' ? doc.name.trim() : '';
 
-          if (raw && typeof raw === 'object') {
-            nameFromSettings = raw.name || '';
-          } else if (typeof raw === 'string') {
-            try {
-              const parsedJson = JSON.parse(raw);
-              nameFromSettings = parsedJson.name || '';
-            } catch {
-              const compact = raw.replace(/\s+/g, ' ');
-              const match = compact.match(/name\s*:\s*'([^']*)'/i);
-              if (match) {
-                nameFromSettings = match[1];
+          if (!nameFromSettings) {
+            if (raw && typeof raw === 'object') {
+              nameFromSettings = raw.name || '';
+            } else if (typeof raw === 'string') {
+              try {
+                const parsedJson = JSON.parse(raw);
+                nameFromSettings = parsedJson.name || '';
+              } catch {
+                const compact = raw.replace(/\s+/g, ' ');
+                const match = compact.match(/name\s*:\s*'([^']*)'/i);
+                if (match) {
+                  nameFromSettings = match[1];
+                }
               }
             }
           }
 
+          const fallbackName = typeof item === 'object' && item?.name ? item.name : configId;
+
           result.push({
             id: configId,
             configDocId: doc.$id,
-            name: nameFromSettings || configId,
+            name: nameFromSettings || fallbackName,
+            payedUntil: doc.payedUntil || null,
             serviceDurations: getServiceDurationsFromSettings(raw),
             servicePrices: getServicePricesFromSettings(raw),
             notifications: getNotificationsFromSettings(raw),
@@ -1358,7 +1580,12 @@ function AdminPage() {
             <p className="admin-hint">Загружаем ваши коннекты…</p>
           )}
 
-          {owns.map((service) => (
+          {owns.map((service) => {
+            const paidLabel = formatPayedUntilLabel(service.payedUntil);
+            const daysLeft = getDaysUntilPayedUntil(service.payedUntil);
+            const isUrgent = paidLabel && daysLeft < 3;
+
+            return (
             <div
               key={service.id || service.name}
               type="button"
@@ -1370,46 +1597,65 @@ function AdminPage() {
                 <p>{service.id}</p>
               </div>
 
-              <div className='btns'>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCopyServiceLink(service.id);
-                  }}
-                >
-                  <img src={copyIcon} />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleViewService(service.id);
-                  }}
-                >
-                  <img src={view} />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEditService(service.id);
-                  }}
-                >
-                  <img src={edit} />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteService(service.id);
-                  }}
-                >
-                  <img src={delet} />
-                </button>
+              <div className="service-card-side">
+                <div className='btns'>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCopyServiceLink(service.id);
+                    }}
+                  >
+                    <img src={copyIcon} alt="" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleViewService(service.id);
+                    }}
+                  >
+                    <img src={view} alt="" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditService(service.id);
+                    }}
+                  >
+                    <img src={edit} alt="" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteService(service.id);
+                    }}
+                  >
+                    <img src={delet} alt="" />
+                  </button>
+                </div>
+                {paidLabel ? (
+                  isUrgent ? (
+                    <button
+                      type="button"
+                      className="service-card-paid-until urgent"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRenewModal(service);
+                      }}
+                    >
+                      {daysLeft < 0 ? 'Срок истёк · продлить' : `${paidLabel} · продлить`}
+                    </button>
+                  ) : (
+                    <p className="service-card-paid-until">{paidLabel}</p>
+                  )
+                ) : null}
               </div>
             </div>
-          ))}
+            );
+          })}
         </section>
       )}
 
@@ -1630,6 +1876,137 @@ function AdminPage() {
               >
                 Понятно
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renewTarget && (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            if (renewSubmitting || renewTelegramWaiting) return;
+            closeRenewModal();
+          }}
+        >
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Продление</h3>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: '#6e6e73' }}>
+              {renewTarget.name}
+            </p>
+
+            <div style={{ display: renewPromoFreeDays > 0 ? 'none' : 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+              {PURCHASE_PLANS.map((p) => (
+                <button
+                  key={p.months}
+                  type="button"
+                  className={renewPlanMonths === p.months ? 'primary-button' : 'secondary-button'}
+                  style={{ padding: '8px 14px' }}
+                  disabled={renewSubmitting || renewTelegramWaiting}
+                  onClick={() => setRenewPlanMonths(p.months)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="modal-row" style={{ marginBottom: 14 }}>
+              <label>
+                <span className="modal-label">Промокод</span>
+                <input
+                  type="text"
+                  value={renewPromoCode}
+                  onChange={(e) => {
+                    setRenewPromoCode(e.target.value);
+                    if (renewPromoDoc) {
+                      setRenewPromoDoc(null);
+                      setRenewPromoError(null);
+                    }
+                  }}
+                  disabled={renewSubmitting || renewTelegramWaiting}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'end', marginTop: -6, marginBottom: 14 }}>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={renewSubmitting || renewTelegramWaiting || renewPromoLoading || renewPromoAttemptsLeft <= 0 || Boolean(renewPromoDoc)}
+                onClick={handleApplyRenewPromo}
+                style={{ padding: '8px 14px' }}
+              >
+                {renewPromoLoading ? 'Проверяем...' : 'Применить'}
+              </button>
+            </div>
+
+            <p style={{ margin: '0 0 10px', fontSize: 13, color: '#1d1d1f' }}>
+              {renewPromoFreeDays > 0 ? (
+                <>
+                  Бесплатно: <span style={{ fontFamily: 'sfb', fontWeight: 700 }}>{renewPromoFreeDays}</span> дней
+                </>
+              ) : (
+                <>
+                  <span style={{ fontFamily: 'sfb', fontWeight: 700 }}>{renewRequiredStarsInt}</span>⭐
+                  <span style={{ color: '#6e6e73' }}> ≈ {Math.round(renewRequiredRub)}₽</span>
+                </>
+              )}
+            </p>
+
+            {renewPromoError ? (
+              <p className="submit-error" style={{ marginTop: 2 }}>{renewPromoError}</p>
+            ) : null}
+
+            {renewPromoDoc ? (
+              <p style={{ margin: '10px 0 0', fontSize: 13, color: '#6e6e73' }}>
+                {renewPromoFreeDays > 0
+                  ? `Промокод: ${renewPromoFreeDays} дней бесплатно`
+                  : `Скидка: -${renewPromoDiscountStarsInt} звёзд`}
+              </p>
+            ) : null}
+
+            {renewError ? (
+              <p className="submit-error" style={{ marginTop: 12 }}>{renewError}</p>
+            ) : null}
+
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              {!renewTelegramWaiting && !renewSubmitting ? (
+                <>
+                  {admin && Number(admin.balance) >= renewRequiredStarsInt && renewRequiredStarsInt > 0 ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={handleRenewFromBalance}
+                    >
+                      С баланса
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={handleRenewViaTelegram}
+                  >
+                    {renewRequiredStarsInt <= 0 ? 'Активировать' : 'Оплатить в Telegram'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  {renewTelegramInvoiceUrl ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => window.open(renewTelegramInvoiceUrl, '_blank', 'noopener,noreferrer')}
+                    >
+                      Открыть бота
+                    </button>
+                  ) : null}
+                  <button type="button" className="primary-button" disabled>
+                    Ожидаем оплату...
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -37,7 +37,7 @@ if not (APPWRITE_PROJECT_ID and APPWRITE_DATABASE_ID and APPWRITE_API_KEY):
     raise RuntimeError("Set APPWRITE_PROJECT_ID, APPWRITE_DATABASE_ID, APPWRITE_API_KEY env vars for bot.")
 
 DB_PATH = os.getenv("PAYMENT_BOT_SQLITE_PATH", os.path.join(os.path.dirname(__file__), "payments.sqlite3"))
-ff
+
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="HTML")
 
 # Ожидаем ввод кода привязки после /start.
@@ -212,6 +212,7 @@ def parse_invoice_payload(payload: str):
     # Format from the frontend:
     # TOPUP:<adminDocId>:<starsInt>
     # PURCHASE:<configOrderDocId>
+    # RENEW:<configOrderDocId>
     if not payload:
         return None
     parts = str(payload).split(":")
@@ -352,6 +353,49 @@ def on_successful_payment(message):
                     # the frontend (which uses a client session) won't be able to read/update it,
                     # causing "missing in list" and crashes when opening edit page.
                     permissions=['read("any")', 'update("any")', 'delete("any")']
+                )
+                return
+
+            if kind == "RENEW" and len(parts) >= 2:
+                order_doc_id = parts[1]
+
+                order_doc = appwrite_get_document(CONFIG_ORDERS_COLLECTION_ID, order_doc_id)
+                order_data = _extract_data(order_doc)
+
+                config_doc_id = order_data.get("configDocId")
+                try:
+                    months_int = int(order_data.get("months") or 1)
+                except Exception:
+                    months_int = 1
+
+                if not config_doc_id:
+                    return
+                if months_int <= 0:
+                    months_int = 1
+
+                config_doc = appwrite_get_document(CONFIG_COLLECTION_ID, config_doc_id)
+                config_data = _extract_data(config_doc)
+                current_payed_until = config_data.get("payedUntil")
+
+                now = datetime.now(timezone.utc)
+                base = now
+                if current_payed_until:
+                    try:
+                        parsed = datetime.fromisoformat(str(current_payed_until).replace("Z", "+00:00"))
+                        if parsed.tzinfo is None:
+                            parsed = parsed.replace(tzinfo=timezone.utc)
+                        if parsed > now:
+                            base = parsed
+                    except Exception:
+                        base = now
+
+                payed_until = add_months_utc(base, months_int)
+                payed_until_iso = payed_until.isoformat().replace("+00:00", "Z")
+
+                appwrite_patch_document(
+                    CONFIG_COLLECTION_ID,
+                    config_doc_id,
+                    {"payedUntil": payed_until_iso},
                 )
                 return
         except Exception as e:
